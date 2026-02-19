@@ -1,0 +1,105 @@
+# ================================
+# NEXUS PRIME Rover Dashboard
+# .gitignore
+# ================================
+
+# ─── Node Modules ───────────────
+node_modules/
+.npm/
+.yarn/
+
+# ─── Build Outputs ──────────────
+dist/
+build/
+out/
+.next/
+
+# ─── Environment Variables ──────
+# IMPORTANT: Never commit secrets!
+# .env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+# Keep .env.example (template)
+!.env.example
+
+# ─── NestJS / TypeScript ────────
+backend/dist/
+backend/*.js.map
+
+# ─── Vite ───────────────────────
+frontend/dist/
+frontend/.vite/
+
+# ─── TypeScript Cache ───────────
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# ─── Logs ───────────────────────
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ─── OS Files ───────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ─── IDE / Editors ──────────────
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.swp
+*.swo
+.project
+.classpath
+.settings/
+
+# ─── Python (Raspberry Pi) ──────
+raspberry-pi/__pycache__/
+raspberry-pi/*.pyc
+raspberry-pi/*.pyo
+raspberry-pi/*.pyd
+raspberry-pi/.venv/
+raspberry-pi/venv/
+raspberry-pi/env/
+raspberry-pi/*.egg-info/
+raspberry-pi/dist/
+raspberry-pi/build/
+*.pt          # YOLO model weights (large files!)
+*.onnx        # Exported ML models
+*.engine      # TensorRT engine files
+
+# ─── Cache ──────────────────────
+.cache/
+.parcel-cache/
+*.cache
+
+# ─── Package Lock (keep one) ────
+# Uncomment whichever you don't use:
+# package-lock.json
+# yarn.lock
+
+# ─── Test Coverage ──────────────
+coverage/
+*.lcov
+.nyc_output/
+
+# ─── Misc ───────────────────────
+*.local
+.eslintcache
+.stylelintcache

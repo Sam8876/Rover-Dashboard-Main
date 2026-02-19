@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+body {
+  margin: 0;
+  font-family: 'Consolas', monospace;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+}
+
+/* CRITICAL: Isolate Leaflet map inside its own stacking context.
+   This prevents Leaflet's internal z-indices (400, 600, 1000...)
+   from leaking out and covering fixed UI panels. */
+.map-wrapper {
+  isolation: isolate;
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+/* Remove leaflet marker default styling */
+.leaflet-marker-icon {
+  border: none !important;
+  background: transparent !important;
+}
+
+/* Rover marker custom styling */
+.rover-marker {
+  background: transparent !important;
+  border: none !important;
+}
+
+/* Fix leaflet popup styling */
+.leaflet-popup-content-wrapper {
+  background: rgba(0, 0, 0, 0.8);
+  color: #00ffe1;
+  border: 1px solid #00ffe1;
+}
+
+.leaflet-popup-tip {
+  background: rgba(0, 0, 0, 0.8);
+}
