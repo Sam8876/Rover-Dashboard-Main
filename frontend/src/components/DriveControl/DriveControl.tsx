@@ -22,7 +22,8 @@ const DEVICES = [
     { id: 'LASER', label: 'LASER', icon: '🎯' },
 ] as const;
 
-const PT_STEP = 10;
+const PT_STEP = 3;    // degrees per tick
+const PT_INTERVAL = 50;  // ms between ticks while held
 
 export default function DriveControl({ socket }: DriveControlProps) {
     const [activeDir, setActiveDir] = useState<Direction | null>(null);
@@ -35,6 +36,7 @@ export default function DriveControl({ socket }: DriveControlProps) {
 
     const panRef = useRef(90);
     const tiltRef = useRef(90);
+    const ptIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     const sendDrive = useCallback((dir: Direction) => {
         socket?.emit('drive-command', { direction: dir, speed: 200 });
@@ -70,27 +72,44 @@ export default function DriveControl({ socket }: DriveControlProps) {
         });
     }, [socket]);
 
+    // ── Pan/tilt: start repeating interval on press, clear on release ──
+    const startPT = useCallback((fn: () => void) => {
+        fn(); // fire immediately
+        ptIntervalRef.current = setInterval(fn, PT_INTERVAL);
+    }, []);
+
+    const stopPT = useCallback(() => {
+        if (ptIntervalRef.current) {
+            clearInterval(ptIntervalRef.current);
+            ptIntervalRef.current = null;
+        }
+    }, []);
+
     const handleKeyDown = useCallback((e: KeyboardEvent) => {
         if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
         if (e.repeat) return;
         const dir = driveKeyMap[e.code];
         if (dir) { e.preventDefault(); setActiveDir(dir); sendDrive(dir); return; }
-        if (e.code === 'KeyQ') { e.preventDefault(); setActivePT('Q'); adjustPan(-PT_STEP); return; }
-        if (e.code === 'KeyE') { e.preventDefault(); setActivePT('E'); adjustPan(+PT_STEP); return; }
-        if (e.code === 'KeyZ') { e.preventDefault(); setActivePT('Z'); adjustTilt(-PT_STEP); return; }
-        if (e.code === 'KeyC') { e.preventDefault(); setActivePT('C'); adjustTilt(+PT_STEP); return; }
-    }, [sendDrive, adjustPan, adjustTilt]);
+        if (e.code === 'KeyQ') { e.preventDefault(); setActivePT('Q'); startPT(() => adjustPan(-PT_STEP)); return; }
+        if (e.code === 'KeyE') { e.preventDefault(); setActivePT('E'); startPT(() => adjustPan(+PT_STEP)); return; }
+        if (e.code === 'KeyZ') { e.preventDefault(); setActivePT('Z'); startPT(() => adjustTilt(-PT_STEP)); return; }
+        if (e.code === 'KeyC') { e.preventDefault(); setActivePT('C'); startPT(() => adjustTilt(+PT_STEP)); return; }
+    }, [sendDrive, adjustPan, adjustTilt, startPT]);
 
     const handleKeyUp = useCallback((e: KeyboardEvent) => {
         if (driveKeyMap[e.code]) { setActiveDir(null); if (driveKeyMap[e.code] !== 'STOP') sendDrive('STOP'); }
-        if (['KeyQ', 'KeyE', 'KeyZ', 'KeyC'].includes(e.code)) setActivePT(null);
-    }, [sendDrive]);
+        if (['KeyQ', 'KeyE', 'KeyZ', 'KeyC'].includes(e.code)) { setActivePT(null); stopPT(); }
+    }, [sendDrive, stopPT]);
 
     useEffect(() => {
         window.addEventListener('keydown', handleKeyDown);
         window.addEventListener('keyup', handleKeyUp);
-        return () => { window.removeEventListener('keydown', handleKeyDown); window.removeEventListener('keyup', handleKeyUp); };
-    }, [handleKeyDown, handleKeyUp]);
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('keyup', handleKeyUp);
+            stopPT();
+        };
+    }, [handleKeyDown, handleKeyUp, stopPT]);
 
     // ── styled button helpers ──────────────────────────────────
     const driveBtn = (dir: Direction, label: string, area: string) => (
@@ -112,8 +131,11 @@ export default function DriveControl({ socket }: DriveControlProps) {
 
     const ptBtn = (key: 'Q' | 'E' | 'Z' | 'C', top: string, sub: string, onClick: () => void) => (
         <button key={key}
-            onMouseDown={() => { setActivePT(key); onClick(); }}
-            onMouseUp={() => setActivePT(null)}
+            onMouseDown={() => { setActivePT(key); startPT(onClick); }}
+            onMouseUp={() => { setActivePT(null); stopPT(); }}
+            onMouseLeave={() => { if (activePT === key) { setActivePT(null); stopPT(); } }}
+            onTouchStart={e => { e.preventDefault(); setActivePT(key); startPT(onClick); }}
+            onTouchEnd={() => { setActivePT(null); stopPT(); }}
             className={`flex flex-col items-center justify-center rounded-lg py-2 border flex-1
                 select-none cursor-pointer transition-all duration-75 gap-0.5
                 ${activePT === key
@@ -169,25 +191,25 @@ export default function DriveControl({ socket }: DriveControlProps) {
                     <div className="flex flex-col justify-between flex-1">
                         <p className="text-[8px] font-bold tracking-widest text-white/30 mb-2 text-center">📷 PAN / TILT</p>
 
-                        {/* Pan row */}
+                        {/* Tilt row (top) */}
                         <div>
-                            <p className="text-[7px] text-white/20 text-center mb-1">
-                                PAN <span className="text-purple-300 font-mono">{pan}°</span>
-                            </p>
-                            <div className="flex gap-1.5">
-                                {ptBtn('Q', 'PAN', '← LEFT', () => adjustPan(-PT_STEP))}
-                                {ptBtn('E', 'PAN', 'RIGHT →', () => adjustPan(+PT_STEP))}
-                            </div>
-                        </div>
-
-                        {/* Tilt row */}
-                        <div className="mt-2">
                             <p className="text-[7px] text-white/20 text-center mb-1">
                                 TILT <span className="text-purple-300 font-mono">{tilt}°</span>
                             </p>
                             <div className="flex gap-1.5">
-                                {ptBtn('Z', 'TILT', '↓ DOWN', () => adjustTilt(-PT_STEP))}
-                                {ptBtn('C', 'TILT', 'UP ↑', () => adjustTilt(+PT_STEP))}
+                                {ptBtn('Q', 'TILT', '← LEFT', () => adjustPan(-PT_STEP))}
+                                {ptBtn('E', 'TILT', 'RIGHT →', () => adjustPan(+PT_STEP))}
+                            </div>
+                        </div>
+
+                        {/* Pan row (bottom) */}
+                        <div className="mt-2">
+                            <p className="text-[7px] text-white/20 text-center mb-1">
+                                PAN <span className="text-purple-300 font-mono">{pan}°</span>
+                            </p>
+                            <div className="flex gap-1.5">
+                                {ptBtn('Z', 'PAN', '↓ DOWN', () => adjustTilt(-PT_STEP))}
+                                {ptBtn('C', 'PAN', 'UP ↑', () => adjustTilt(+PT_STEP))}
                             </div>
                         </div>
 
