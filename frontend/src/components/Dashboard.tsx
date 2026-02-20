@@ -12,7 +12,7 @@ const BACKEND_URL = `http://${window.location.hostname}:8080`;
 
 export default function Dashboard() {
     const { socket, connected } = useWebSocket(BACKEND_URL);
-    const { gpsData, radarData, imuData, envData, powerData, yoloObjects } = useRoverData(socket);
+    const { gpsData, radarData, imuData, envData, powerData, yoloObjects } = useRoverData(socket, connected);
 
     return (
         <div className="w-full h-screen bg-rover-dark overflow-hidden">

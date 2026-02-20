@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import type { YoloObject } from '../../types/rover.types';
 
 interface CameraFeedProps {
@@ -6,211 +6,203 @@ interface CameraFeedProps {
     backendUrl: string;
 }
 
+type CamId = 1 | 2;
+
 export default function CameraFeed({ yoloObjects, backendUrl }: CameraFeedProps) {
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
-    const [isConnected, setIsConnected] = useState(false);
-    const [webrtcUrl, setWebrtcUrl] = useState<string>('');
+    const pcRef = useRef<RTCPeerConnection | null>(null);
 
-    // Fetch WebRTC URL from backend
+    const [activeCam, setActiveCam] = useState<CamId>(1);
+    const [isConnected, setIsConnected] = useState(false);
+    const [camUrls, setCamUrls] = useState<{ cam1: string; cam2: string } | null>(null);
+
+    // ── Fetch both camera URLs from backend once ──────────────
     useEffect(() => {
         fetch(`${backendUrl}/config/webrtc-url`)
-            .then(res => res.json())
+            .then(r => r.json())
             .then(data => {
-                console.log('WebRTC URL from backend:', data.url);
-                setWebrtcUrl(data.url);
+                console.log('Camera URLs:', data);
+                setCamUrls({ cam1: data.cam1, cam2: data.cam2 });
             })
-            .catch(err => console.error('Failed to fetch WebRTC URL:', err));
+            .catch(err => console.error('Failed to fetch camera URLs:', err));
     }, [backendUrl]);
 
-    // Setup WebRTC connection with HTTP or WebSocket signaling
-    useEffect(() => {
-        if (!webrtcUrl) return;
+    // ── Connect / reconnect WebRTC whenever cam URL changes ───
+    const connect = useCallback((url: string) => {
+        // Tear down existing connection
+        if (pcRef.current) {
+            pcRef.current.close();
+            pcRef.current = null;
+        }
+        if (videoRef.current) videoRef.current.srcObject = null;
+        setIsConnected(false);
 
-        const isHttpProtocol = webrtcUrl.startsWith('http://') || webrtcUrl.startsWith('https://');
-        const isWebSocket = webrtcUrl.startsWith('ws://') || webrtcUrl.startsWith('wss://');
+        const isHttp = url.startsWith('http://') || url.startsWith('https://');
+        const isWs = url.startsWith('ws://') || url.startsWith('wss://');
 
-        console.log(`Connecting to Pi WebRTC server: ${webrtcUrl}`);
-        console.log(`Protocol: ${isHttpProtocol ? 'HTTP API' : isWebSocket ? 'WebSocket' : 'Unknown'}`);
+        console.log(`[CAM] Connecting → ${url}`);
 
         const pc = new RTCPeerConnection({
             iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' }
-            ]
+                { urls: 'stun:stun1.l.google.com:19302' },
+            ],
         });
+        pcRef.current = pc;
 
-        // Handle incoming media stream
         pc.ontrack = (event) => {
-            console.log('WebRTC track received:', event.track.kind);
             if (videoRef.current && event.streams[0]) {
                 videoRef.current.srcObject = event.streams[0];
                 setIsConnected(true);
             }
         };
 
-        // Connection state monitoring
         pc.onconnectionstatechange = () => {
-            console.log('WebRTC connection state:', pc.connectionState);
             setIsConnected(pc.connectionState === 'connected');
         };
 
-        if (isHttpProtocol) {
-            // HTTP-based signaling
-            setupHttpSignaling(pc, webrtcUrl);
-        } else if (isWebSocket) {
-            // WebSocket-based signaling
-            setupWebSocketSignaling(pc, webrtcUrl);
-        }
+        if (isHttp) setupHttp(pc, url);
+        else if (isWs) setupWs(pc, url);
+    }, []);
 
-        return () => {
-            console.log('Cleaning up WebRTC connection');
-            pc.close();
-        };
-    }, [webrtcUrl]);
+    useEffect(() => {
+        if (!camUrls) return;
+        const url = activeCam === 1 ? camUrls.cam1 : camUrls.cam2;
+        connect(url);
+        return () => { pcRef.current?.close(); };
+    }, [activeCam, camUrls, connect]);
 
-    // HTTP-based WebRTC signaling
-    const setupHttpSignaling = async (pc: RTCPeerConnection, url: string) => {
+    // ── HTTP signaling ────────────────────────────────────────
+    async function setupHttp(pc: RTCPeerConnection, url: string) {
         try {
-            // Create offer
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
-
-            console.log('Sending offer to Pi via HTTP POST...');
-
-            // Send offer to Pi and get answer via HTTP
-            const response = await fetch(url, {
+            const res = await fetch(url, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    type: 'offer',
-                    sdp: pc.localDescription?.sdp
-                })
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ type: 'offer', sdp: pc.localDescription?.sdp }),
             });
-
-            const data = await response.json();
-            console.log('Received answer from Pi:', data);
-
+            const data = await res.json();
             if (data.type === 'answer' && data.sdp) {
-                await pc.setRemoteDescription(new RTCSessionDescription({
-                    type: 'answer',
-                    sdp: data.sdp
-                }));
-                console.log('✅ HTTP WebRTC signaling completed');
+                await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: data.sdp }));
             }
-
-            // Handle ICE candidates
-            pc.onicecandidate = async (event) => {
-                if (event.candidate) {
-                    // Send ICE candidate via HTTP
+            pc.onicecandidate = async (e) => {
+                if (e.candidate) {
                     await fetch(`${url}/ice`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ candidate: event.candidate })
-                    }).catch(err => console.log('ICE candidate send failed:', err));
+                        body: JSON.stringify({ candidate: e.candidate }),
+                    }).catch(() => { });
                 }
             };
-
-        } catch (error) {
-            console.error('HTTP signaling error:', error);
+        } catch (err) {
+            console.error('[CAM] HTTP signaling error:', err);
         }
-    };
+    }
 
-    // WebSocket-based WebRTC signaling
-    const setupWebSocketSignaling = (pc: RTCPeerConnection, url: string) => {
+    // ── WebSocket signaling ───────────────────────────────────
+    function setupWs(pc: RTCPeerConnection, url: string) {
         const ws = new WebSocket(url);
-
         ws.onopen = async () => {
-            console.log('WebSocket connected to Pi');
-
-            // Create and send offer
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
             ws.send(JSON.stringify({ type: 'offer', offer }));
         };
-
-        ws.onmessage = async (event) => {
-            const message = JSON.parse(event.data);
-
-            if (message.type === 'answer') {
-                console.log('Received answer from Pi');
-                await pc.setRemoteDescription(new RTCSessionDescription(message.answer));
-            } else if (message.type === 'ice-candidate') {
-                await pc.addIceCandidate(new RTCIceCandidate(message.candidate));
+        ws.onmessage = async (e) => {
+            const msg = JSON.parse(e.data);
+            if (msg.type === 'answer') {
+                await pc.setRemoteDescription(new RTCSessionDescription(msg.answer));
+            } else if (msg.type === 'ice-candidate') {
+                await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
             }
         };
-
-        pc.onicecandidate = (event) => {
-            if (event.candidate && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({
-                    type: 'ice-candidate',
-                    candidate: event.candidate
-                }));
+        pc.onicecandidate = (e) => {
+            if (e.candidate && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'ice-candidate', candidate: e.candidate }));
             }
         };
+        ws.onerror = (err) => console.error('[CAM] WS error:', err);
+    }
 
-        ws.onerror = (error) => {
-            console.error('WebSocket error:', error);
-        };
-    };
-
-    // Draw YOLO bounding boxes on canvas overlay
+    // ── YOLO bounding boxes ───────────────────────────────────
     useEffect(() => {
         const canvas = canvasRef.current;
         const video = videoRef.current;
         if (!canvas || !video) return;
-
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
-
-        // Resize canvas to match video
         canvas.width = video.clientWidth;
         canvas.height = video.clientHeight;
-
-        // Clear canvas
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        // Draw YOLO bounding boxes
         yoloObjects.forEach((obj) => {
             ctx.strokeStyle = '#00ffe1';
             ctx.lineWidth = 2;
             ctx.strokeRect(obj.x, obj.y, obj.w, obj.h);
-
             ctx.fillStyle = '#00ffe1';
             ctx.font = '12px monospace';
-            ctx.fillText(
-                `${obj.label} (${obj.conf})`,
-                obj.x,
-                obj.y > 15 ? obj.y - 5 : obj.y + 15
-            );
+            ctx.fillText(`${obj.label} (${obj.conf})`, obj.x, obj.y > 15 ? obj.y - 5 : obj.y + 15);
         });
     }, [yoloObjects]);
 
+    // ── Render ────────────────────────────────────────────────
     return (
         <div className="fixed bottom-4 right-4 z-40">
-            <div className="bg-black/30 backdrop-blur-md border-2 border-rover-cyan rounded-lg p-4 shadow-lg shadow-rover-cyan/25">
-                <h2 className="text-rover-cyan text-lg font-bold mb-2 tracking-wider">
-                    LIVE CAMERA
-                </h2>
-                <div className="relative w-[400px] h-[300px] bg-black rounded overflow-hidden border border-rover-cyan">
+            <div className="bg-black/80 backdrop-blur-md border border-white/15 rounded-2xl overflow-hidden shadow-2xl"
+                style={{ boxShadow: '0 0 30px rgba(0,0,0,0.6), 0 0 1px rgba(0,255,225,0.2) inset' }}>
+
+                {/* Header */}
+                <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/8">
+                    <div className="flex items-center gap-2">
+                        <div className={`w-2 h-2 rounded-full shrink-0 ${isConnected
+                            ? 'bg-green-400 animate-pulse shadow-[0_0_6px_#4ade80]'
+                            : 'bg-red-500/70'
+                            }`} />
+                        <span className="text-xs font-bold tracking-widest text-white">LIVE CAMERA</span>
+                    </div>
+
+                    {/* Camera switcher buttons */}
+                    <div className="flex gap-1 p-0.5 bg-white/6 rounded-lg border border-white/10">
+                        {([1, 2] as CamId[]).map(id => (
+                            <button
+                                key={id}
+                                onClick={() => setActiveCam(id)}
+                                className={`text-[10px] font-bold font-mono px-2.5 py-1 rounded-md transition-all duration-200 ${activeCam === id
+                                    ? 'bg-rover-cyan text-black shadow-[0_0_8px_rgba(0,255,225,0.5)]'
+                                    : 'text-white/40 hover:text-white/70'
+                                    }`}
+                            >
+                                CAM {id}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Video area — 16:9 container, any aspect ratio fits perfectly */}
+                <div className="relative w-[520px] bg-black" style={{ aspectRatio: '16/9' }}>
                     <video
                         ref={videoRef}
                         autoPlay
                         playsInline
                         muted
-                        className="w-full h-full object-cover"
+                        className="w-full h-full object-contain"
                     />
                     <canvas
                         ref={canvasRef}
                         className="absolute top-0 left-0 w-full h-full pointer-events-none"
                     />
-                    <div className={`absolute bottom-2 right-2 text-xs px-2 py-1 rounded border ${isConnected
-                        ? 'bg-green-500/60 text-white border-green-500'
-                        : 'bg-black/60 text-rover-cyan/50 border-rover-cyan/50'
+
+                    {/* Status badge */}
+                    <div className={`absolute bottom-2 left-2 text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${isConnected
+                        ? 'bg-green-500/20 text-green-400 border-green-500/40'
+                        : 'bg-black/60 text-white/30 border-white/15'
                         }`}>
-                        {isConnected ? 'LIVE' : 'CONNECTING...'}
+                        {isConnected ? '● LIVE' : '○ CONNECTING…'}
+                    </div>
+
+                    {/* Camera label badge */}
+                    <div className="absolute top-2 right-2 text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-black/50 border border-white/15 text-white/50">
+                        CAM {activeCam}
                     </div>
                 </div>
             </div>

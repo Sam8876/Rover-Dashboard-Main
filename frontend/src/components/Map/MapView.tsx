@@ -27,10 +27,9 @@ function MapClickHandler({
 export default function MapView({ gpsData, socket }: MapViewProps) {
     const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
 
-    // Default center (will be replaced by actual rover position)
-    const center: [number, number] = gpsData
-        ? [gpsData.lat, gpsData.lon]
-        : [18.584056, 73.736556]; // Default: 18°35'02.6"N 73°44'11.6"E
+    // Default center (0, 0) until GPS lock
+    const center: [number, number] = gpsData ? [gpsData.lat, gpsData.lon] : [0, 0];
+    const defaultZoom = gpsData ? 15 : 2;
 
     const handleMapClick = (lat: number, lon: number) => {
         const newWaypoint: Waypoint = {
@@ -72,7 +71,7 @@ export default function MapView({ gpsData, socket }: MapViewProps) {
         <div className="map-wrapper">
             <MapContainer
                 center={center}
-                zoom={15}
+                zoom={defaultZoom}
                 className="w-full h-full"
                 zoomControl={false}
             >
