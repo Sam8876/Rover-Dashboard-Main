@@ -191,25 +191,25 @@ export default function DriveControl({ socket }: DriveControlProps) {
                     <div className="flex flex-col justify-between flex-1">
                         <p className="text-[8px] font-bold tracking-widest text-white/30 mb-2 text-center">📷 PAN / TILT</p>
 
-                        {/* Tilt row (top) */}
+                        {/* Pan row (Q / E) */}
                         <div>
-                            <p className="text-[7px] text-white/20 text-center mb-1">
-                                TILT <span className="text-purple-300 font-mono">{tilt}°</span>
-                            </p>
-                            <div className="flex gap-1.5">
-                                {ptBtn('Q', 'TILT', '← LEFT', () => adjustPan(-PT_STEP))}
-                                {ptBtn('E', 'TILT', 'RIGHT →', () => adjustPan(+PT_STEP))}
-                            </div>
-                        </div>
-
-                        {/* Pan row (bottom) */}
-                        <div className="mt-2">
                             <p className="text-[7px] text-white/20 text-center mb-1">
                                 PAN <span className="text-purple-300 font-mono">{pan}°</span>
                             </p>
                             <div className="flex gap-1.5">
-                                {ptBtn('Z', 'PAN', '↓ DOWN', () => adjustTilt(-PT_STEP))}
-                                {ptBtn('C', 'PAN', 'UP ↑', () => adjustTilt(+PT_STEP))}
+                                {ptBtn('Q', 'PAN', '← LEFT', () => adjustPan(-PT_STEP))}
+                                {ptBtn('E', 'PAN', 'RIGHT →', () => adjustPan(+PT_STEP))}
+                            </div>
+                        </div>
+
+                        {/* Tilt row (Z / C) */}
+                        <div className="mt-2">
+                            <p className="text-[7px] text-white/20 text-center mb-1">
+                                TILT <span className="text-purple-300 font-mono">{tilt}°</span>
+                            </p>
+                            <div className="flex gap-1.5">
+                                {ptBtn('Z', 'TILT', '↓ DOWN', () => adjustTilt(-PT_STEP))}
+                                {ptBtn('C', 'TILT', 'UP ↑', () => adjustTilt(+PT_STEP))}
                             </div>
                         </div>
 
