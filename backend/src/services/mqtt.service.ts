@@ -25,19 +25,23 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
         this.client.on('connect', () => {
             console.log('✅ Connected to MQTT broker');
             this.client.subscribe([
-                // Sensor ESP32
-                'rover/ultrasonic',  // 4x HC-SR04 distances
-                'rover/imu',         // MPU6050 roll/pitch/yaw
-                'rover/env',         // DHT22/BME280 temp/humidity + BH1750 lux
-                'rover/power',       // INA219 voltage/current
+                // Sensor ESP32 — all-in-one topic (actual ESP32 topic)
+                'rover/node1/data',  // ← your ESP32 publishes here
+                'rover/+/data',      // wildcard for any node (node2, node3...)
+
+                // Sensor ESP32 — individual topics (if split later)
+                'rover/ultrasonic',
+                'rover/imu',
+                'rover/env',
+                'rover/power',
 
                 // GPS-GSM ESP32
                 'rover/gps',
 
-                // Actuator ESP32 (status feedback)
+                // Actuator ESP32
                 'rover/actuator/status',
 
-                // Legacy / generic
+                // Legacy
                 'rover/sensor',
             ], (err) => {
                 if (err) console.error('MQTT subscribe error:', err);
@@ -127,7 +131,10 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
             // ─── Sensor ESP32 (all-in-one payload) ───────────────────
             // Format: { node, radar:{front,right,back,left}, temp, hum, lux,
             //           imu:{roll,pitch,yaw}, power:{solarV,loadV,solarI,loadI} }
-            case 'rover/sensor':
+            case 'rover/node1/data':  // ← actual ESP32 topic
+            case 'rover/node2/data':
+            case 'rover/node3/data':
+            case 'rover/sensor':      // legacy alias
                 // Radar
                 if (data.radar) {
                     this.roverGateway.broadcastToDashboards('radar-data', {
