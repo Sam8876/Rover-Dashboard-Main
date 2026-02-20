@@ -1,0 +1,197 @@
+import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import * as mqtt from 'mqtt';
+import { RoverGateway } from '../gateways/rover.gateway';
+
+@Injectable()
+export class MqttService implements OnModuleInit, OnModuleDestroy {
+    private client: mqtt.MqttClient;
+
+    constructor(
+        private configService: ConfigService,
+        private roverGateway: RoverGateway,
+    ) { }
+
+    onModuleInit() {
+        const brokerUrl = this.configService.get<string>('MQTT_BROKER_URL', 'mqtt://localhost:1883');
+        console.log(`Connecting to MQTT broker: ${brokerUrl}`);
+
+        this.client = mqtt.connect(brokerUrl, {
+            clientId: `nexus-backend-${Date.now()}`,
+            clean: true,
+            reconnectPeriod: 3000,
+        });
+
+        this.client.on('connect', () => {
+            console.log('✅ Connected to MQTT broker');
+            this.client.subscribe([
+                // Sensor ESP32
+                'rover/ultrasonic',  // 4x HC-SR04 distances
+                'rover/imu',         // MPU6050 roll/pitch/yaw
+                'rover/env',         // DHT22/BME280 temp/humidity + BH1750 lux
+                'rover/power',       // INA219 voltage/current
+
+                // GPS-GSM ESP32
+                'rover/gps',
+
+                // Actuator ESP32 (status feedback)
+                'rover/actuator/status',
+
+                // Legacy / generic
+                'rover/sensor',
+            ], (err) => {
+                if (err) console.error('MQTT subscribe error:', err);
+                else console.log('📡 Subscribed to all rover MQTT topics');
+            });
+        });
+
+        this.client.on('message', (topic, payload) => {
+            const raw = payload.toString();
+            console.log(`[MQTT] ${topic}: ${raw}`);
+
+            let data: any;
+            try {
+                data = JSON.parse(raw);
+            } catch {
+                data = this.parsePlainString(raw);
+            }
+
+            this.routeMessage(topic, data);
+        });
+
+        this.client.on('error', (err) => console.error('MQTT error:', err.message));
+        this.client.on('reconnect', () => console.log('🔄 MQTT reconnecting...'));
+    }
+
+    private routeMessage(topic: string, data: any) {
+        switch (topic) {
+
+            // ─── Sensor ESP32 ─────────────────────────────────────────
+            case 'rover/ultrasonic':
+                // { front, right, back, left } in cm
+                this.roverGateway.broadcastToDashboards('radar-data', {
+                    front: parseFloat(data.front ?? 999),
+                    right: parseFloat(data.right ?? 999),
+                    back: parseFloat(data.back ?? 999),
+                    left: parseFloat(data.left ?? 999),
+                });
+                break;
+
+            case 'rover/imu':
+                // { roll, pitch, yaw } in degrees
+                this.roverGateway.broadcastToDashboards('imu-data', {
+                    roll: parseFloat(data.roll ?? 0),
+                    pitch: parseFloat(data.pitch ?? 0),
+                    yaw: parseFloat(data.yaw ?? 0),
+                });
+                break;
+
+            case 'rover/env':
+                // { temperature, humidity, lux }
+                this.roverGateway.broadcastToDashboards('env-data', {
+                    temperature: parseFloat(data.temperature ?? data.temp ?? 0),
+                    humidity: parseFloat(data.humidity ?? data.hum ?? 0),
+                    lux: parseFloat(data.lux ?? 0),
+                });
+                break;
+
+            case 'rover/power':
+                // { voltage, current } — power calculated here
+                const voltage = parseFloat(data.voltage ?? data.v ?? 0);
+                const current = parseFloat(data.current ?? data.i ?? 0);
+                this.roverGateway.broadcastToDashboards('power-data', {
+                    voltage,
+                    current,
+                    power: parseFloat((voltage * current).toFixed(2)),
+                });
+                break;
+
+            // ─── GPS-GSM ESP32 ────────────────────────────────────────
+            case 'rover/gps':
+                // { lat, lon, speed, heading, satellites, signal }
+                this.roverGateway.broadcastToDashboards('gps-data', {
+                    lat: parseFloat(data.lat ?? data.latitude ?? 0),
+                    lon: parseFloat(data.lon ?? data.longitude ?? data.lng ?? 0),
+                    speed: parseFloat(data.speed ?? 0),
+                    heading: parseFloat(data.heading ?? data.course ?? 0),
+                    satellites: parseInt(data.satellites ?? data.sats ?? 0),
+                    signal: parseInt(data.signal ?? data.rssi ?? 0),
+                });
+                break;
+
+            // ─── Actuator ESP32 ───────────────────────────────────────
+            case 'rover/actuator/status':
+                this.roverGateway.broadcastToDashboards('actuator-status', data);
+                break;
+
+            // ─── Sensor ESP32 (all-in-one payload) ───────────────────
+            // Format: { node, radar:{front,right,back,left}, temp, hum, lux,
+            //           imu:{roll,pitch,yaw}, power:{solarV,loadV,solarI,loadI} }
+            case 'rover/sensor':
+                // Radar
+                if (data.radar) {
+                    this.roverGateway.broadcastToDashboards('radar-data', {
+                        front: parseFloat(data.radar.front ?? 999),
+                        right: parseFloat(data.radar.right ?? 999),
+                        back: parseFloat(data.radar.back ?? 999),
+                        left: parseFloat(data.radar.left ?? 999),
+                    });
+                }
+                // IMU
+                if (data.imu) {
+                    this.roverGateway.broadcastToDashboards('imu-data', {
+                        roll: parseFloat(data.imu.roll ?? 0),
+                        pitch: parseFloat(data.imu.pitch ?? 0),
+                        yaw: parseFloat(data.imu.yaw ?? 0),
+                    });
+                }
+                // Environment
+                if (data.temp !== undefined) {
+                    this.roverGateway.broadcastToDashboards('env-data', {
+                        temperature: parseFloat(data.temp ?? 0),
+                        humidity: parseFloat(data.hum ?? 0),
+                        lux: parseFloat(data.lux ?? 0),
+                    });
+                }
+                // Power (solarV/loadV in V, solarI/loadI in mA)
+                if (data.power) {
+                    const solarV = parseFloat(data.power.solarV ?? 0);
+                    const loadV = parseFloat(data.power.loadV ?? 0);
+                    const solarI = parseFloat(data.power.solarI ?? 0);
+                    const loadI = parseFloat(data.power.loadI ?? 0);
+                    this.roverGateway.broadcastToDashboards('power-data', {
+                        solarV,
+                        loadV,
+                        solarI,
+                        loadI,
+                        solarW: parseFloat((solarV * solarI / 1000).toFixed(2)),
+                        loadW: parseFloat((loadV * loadI / 1000).toFixed(2)),
+                    });
+                }
+                break;
+
+            default:
+                console.log(`[MQTT] Unhandled topic: ${topic}`);
+        }
+    }
+
+    private parsePlainString(raw: string): Record<string, any> {
+        const result: Record<string, any> = { _raw: raw };
+        const parts = raw.split(',');
+        for (const part of parts) {
+            const [key, value] = part.trim().split(':');
+            if (key && value !== undefined) {
+                const num = parseFloat(value.trim());
+                result[key.trim().toLowerCase()] = isNaN(num) ? value.trim() : num;
+            }
+        }
+        return result;
+    }
+
+    onModuleDestroy() {
+        if (this.client) {
+            this.client.end();
+            console.log('MQTT client disconnected');
+        }
+    }
+}

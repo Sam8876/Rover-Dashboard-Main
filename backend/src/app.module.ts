@@ -4,6 +4,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { RoverGateway } from './gateways/rover.gateway';
 import { ConfigController } from './controllers/config.controller';
+import { MqttService } from './services/mqtt.service';
 
 @Module({
   imports: [
@@ -12,6 +13,6 @@ import { ConfigController } from './controllers/config.controller';
     }),
   ],
   controllers: [AppController, ConfigController],
-  providers: [AppService, RoverGateway],
+  providers: [AppService, RoverGateway, MqttService],
 })
 export class AppModule { }

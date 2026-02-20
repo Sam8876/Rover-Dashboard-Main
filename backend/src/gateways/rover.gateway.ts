@@ -33,6 +33,13 @@ export class RoverGateway implements OnGatewayConnection, OnGatewayDisconnect {
         this.roverClients.delete(client);
     }
 
+    // Called by MqttService to push sensor data to all dashboards
+    broadcastToDashboards(event: string, data: any) {
+        this.dashboardClients.forEach((client) => {
+            client.emit(event, data);
+        });
+    }
+
     @SubscribeMessage('register-dashboard')
     handleDashboardRegister(@ConnectedSocket() client: Socket) {
         this.dashboardClients.add(client);

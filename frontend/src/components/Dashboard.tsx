@@ -7,12 +7,12 @@ import CameraFeed from './Camera/CameraFeed';
 import TelemetryOverlay from './Telemetry/TelemetryOverlay';
 import DriveControl from './DriveControl/DriveControl';
 
-// Update this URL to your NestJS backend
-const BACKEND_URL = 'http://localhost:3000';
+// Dynamically use the same host the page is served from — works on localhost AND via Tailscale
+const BACKEND_URL = `http://${window.location.hostname}:8080`;
 
 export default function Dashboard() {
     const { socket, connected } = useWebSocket(BACKEND_URL);
-    const { gpsData, radarData, yoloObjects } = useRoverData(socket);
+    const { gpsData, radarData, imuData, envData, powerData, yoloObjects } = useRoverData(socket);
 
     return (
         <div className="w-full h-screen bg-rover-dark overflow-hidden">
@@ -20,7 +20,13 @@ export default function Dashboard() {
 
             <MapView gpsData={gpsData} socket={socket} />
 
-            <TelemetryOverlay gpsData={gpsData} connected={connected} />
+            <TelemetryOverlay
+                gpsData={gpsData}
+                imuData={imuData}
+                envData={envData}
+                powerData={powerData}
+                connected={connected}
+            />
 
             <RadarDisplay radarData={radarData} />
 
