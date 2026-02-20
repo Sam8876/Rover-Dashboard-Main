@@ -90,10 +90,10 @@ export default function MapView({ gpsData, socket }: MapViewProps) {
                 />
             </MapContainer>
 
-            {/* Waypoint control panel - fixed so it's above the isolated map */}
+            {/* Waypoint control panel – right of Radar window */}
             {waypoints.length > 0 && (
-                <div style={{ position: 'fixed', top: '5rem', left: '1rem', zIndex: 9999 }}
-                    className="bg-black/50 backdrop-blur-md border-2 border-rover-cyan rounded-lg p-4 shadow-lg shadow-rover-cyan/25 min-w-[200px]">
+                <div style={{ position: 'fixed', bottom: '1rem', left: '340px', zIndex: 9999 }}
+                    className="bg-black/70 backdrop-blur-md border border-white/15 rounded-xl p-4 shadow-xl min-w-[200px]">
                     <div className="flex items-center justify-between mb-3">
                         <h3 className="text-rover-cyan font-bold text-sm tracking-wider">
                             WAYPOINTS ({waypoints.length})
@@ -105,7 +105,7 @@ export default function MapView({ gpsData, socket }: MapViewProps) {
                             Clear All
                         </button>
                     </div>
-                    <div className="text-xs text-white/70 font-mono mb-3">
+                    <div className="text-xs text-white/50 font-mono mb-3">
                         Click map to add waypoints
                     </div>
                     <button

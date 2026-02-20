@@ -1,117 +1,219 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import type { Socket } from 'socket.io-client';
 
 interface DriveControlProps {
     socket: Socket | null;
 }
 
-type Direction = 'forward' | 'backward' | 'left' | 'right' | 'stop';
+type Direction = 'FORWARD' | 'BACKWARD' | 'LEFT' | 'RIGHT' | 'STOP';
 
-const keyMap: Record<string, Direction> = {
-    ArrowUp: 'forward',
-    ArrowDown: 'backward',
-    ArrowLeft: 'left',
-    ArrowRight: 'right',
-    KeyW: 'forward',
-    KeyS: 'backward',
-    KeyA: 'left',
-    KeyD: 'right',
-    Space: 'stop',
+const driveKeyMap: Record<string, Direction> = {
+    ArrowUp: 'FORWARD', ArrowDown: 'BACKWARD',
+    ArrowLeft: 'LEFT', ArrowRight: 'RIGHT',
+    KeyW: 'FORWARD', KeyS: 'BACKWARD',
+    KeyA: 'LEFT', KeyD: 'RIGHT',
+    Space: 'STOP',
 };
 
-export default function DriveControl({ socket }: DriveControlProps) {
-    const [activeKey, setActiveKey] = useState<Direction | null>(null);
+const DEVICES = [
+    { id: 'HEADLIGHT', label: 'HEAD', icon: '💡' },
+    { id: 'TAILLIGHT', label: 'TAIL', icon: '🔴' },
+    { id: 'DRL', label: 'DRL', icon: '🌟' },
+    { id: 'LASER', label: 'LASER', icon: '🎯' },
+] as const;
 
-    const sendCommand = useCallback((direction: Direction) => {
-        if (!socket) return;
-        socket.emit('drive-command', { direction });
+const PT_STEP = 10;
+
+export default function DriveControl({ socket }: DriveControlProps) {
+    const [activeDir, setActiveDir] = useState<Direction | null>(null);
+    const [pan, setPan] = useState(90);
+    const [tilt, setTilt] = useState(90);
+    const [activePT, setActivePT] = useState<string | null>(null);
+    const [devices, setDevices] = useState<Record<string, boolean>>({
+        HEADLIGHT: false, TAILLIGHT: false, DRL: false, LASER: false,
+    });
+
+    const panRef = useRef(90);
+    const tiltRef = useRef(90);
+
+    const sendDrive = useCallback((dir: Direction) => {
+        socket?.emit('drive-command', { direction: dir, speed: 200 });
+    }, [socket]);
+
+    const sendPanTilt = useCallback((p: number, t: number) => {
+        socket?.emit('pantilt-command', { pan: p, tilt: t });
+    }, [socket]);
+
+    const adjustPan = useCallback((delta: number) => {
+        setPan(prev => {
+            const next = Math.max(0, Math.min(180, prev + delta));
+            panRef.current = next;
+            sendPanTilt(next, tiltRef.current);
+            return next;
+        });
+    }, [sendPanTilt]);
+
+    const adjustTilt = useCallback((delta: number) => {
+        setTilt(prev => {
+            const next = Math.max(0, Math.min(180, prev + delta));
+            tiltRef.current = next;
+            sendPanTilt(panRef.current, next);
+            return next;
+        });
+    }, [sendPanTilt]);
+
+    const toggleDevice = useCallback((id: string) => {
+        setDevices(prev => {
+            const next = !prev[id];
+            socket?.emit('device-command', { device: id, state: next ? 1 : 0 });
+            return { ...prev, [id]: next };
+        });
     }, [socket]);
 
     const handleKeyDown = useCallback((e: KeyboardEvent) => {
         if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-        const dir = keyMap[e.code];
-        if (!dir || e.repeat) return;
-        e.preventDefault();
-        setActiveKey(dir === 'stop' ? 'stop' : dir);
-        sendCommand(dir);
-    }, [sendCommand]);
+        if (e.repeat) return;
+        const dir = driveKeyMap[e.code];
+        if (dir) { e.preventDefault(); setActiveDir(dir); sendDrive(dir); return; }
+        if (e.code === 'KeyQ') { e.preventDefault(); setActivePT('Q'); adjustPan(-PT_STEP); return; }
+        if (e.code === 'KeyE') { e.preventDefault(); setActivePT('E'); adjustPan(+PT_STEP); return; }
+        if (e.code === 'KeyZ') { e.preventDefault(); setActivePT('Z'); adjustTilt(-PT_STEP); return; }
+        if (e.code === 'KeyC') { e.preventDefault(); setActivePT('C'); adjustTilt(+PT_STEP); return; }
+    }, [sendDrive, adjustPan, adjustTilt]);
 
     const handleKeyUp = useCallback((e: KeyboardEvent) => {
-        const dir = keyMap[e.code];
-        if (!dir) return;
-        setActiveKey(null);
-        if (dir !== 'stop') sendCommand('stop');
-    }, [sendCommand]);
+        if (driveKeyMap[e.code]) { setActiveDir(null); if (driveKeyMap[e.code] !== 'STOP') sendDrive('STOP'); }
+        if (['KeyQ', 'KeyE', 'KeyZ', 'KeyC'].includes(e.code)) setActivePT(null);
+    }, [sendDrive]);
 
     useEffect(() => {
         window.addEventListener('keydown', handleKeyDown);
         window.addEventListener('keyup', handleKeyUp);
-        return () => {
-            window.removeEventListener('keydown', handleKeyDown);
-            window.removeEventListener('keyup', handleKeyUp);
-        };
+        return () => { window.removeEventListener('keydown', handleKeyDown); window.removeEventListener('keyup', handleKeyUp); };
     }, [handleKeyDown, handleKeyUp]);
 
-    const btn = (dir: Direction, label: string, gridArea: string) => (
-        <button
-            key={dir}
-            style={{ gridArea }}
-            onMouseDown={() => { setActiveKey(dir); sendCommand(dir); }}
-            onMouseUp={() => { setActiveKey(null); sendCommand('stop'); }}
-            onMouseLeave={() => { if (activeKey === dir) { setActiveKey(null); sendCommand('stop'); } }}
-            onTouchStart={(e) => { e.preventDefault(); setActiveKey(dir); sendCommand(dir); }}
-            onTouchEnd={() => { setActiveKey(null); sendCommand('stop'); }}
-            className={`flex items-center justify-center rounded-md text-base font-bold
-                select-none cursor-pointer transition-all duration-75 border-2
-                ${activeKey === dir
-                    ? 'bg-rover-cyan text-black border-rover-cyan scale-95 shadow-[0_0_12px_rgba(0,255,225,0.7)]'
+    // ── styled button helpers ──────────────────────────────────
+    const driveBtn = (dir: Direction, label: string, area: string) => (
+        <button key={dir} style={{ gridArea: area }}
+            onMouseDown={() => { setActiveDir(dir); sendDrive(dir); }}
+            onMouseUp={() => { setActiveDir(null); sendDrive('STOP'); }}
+            onMouseLeave={() => { if (activeDir === dir) { setActiveDir(null); sendDrive('STOP'); } }}
+            onTouchStart={e => { e.preventDefault(); setActiveDir(dir); sendDrive(dir); }}
+            onTouchEnd={() => { setActiveDir(null); sendDrive('STOP'); }}
+            className={`flex items-center justify-center rounded-md font-bold select-none cursor-pointer
+                transition-all duration-75 border-2 text-base
+                ${activeDir === dir
+                    ? 'bg-rover-cyan text-black border-rover-cyan scale-95 shadow-[0_0_10px_rgba(0,255,225,0.6)]'
                     : 'bg-black/50 text-rover-cyan border-rover-cyan/40 hover:border-rover-cyan hover:bg-rover-cyan/10'
-                }`}
-        >
+                }`}>
             {label}
+        </button>
+    );
+
+    const ptBtn = (key: 'Q' | 'E' | 'Z' | 'C', top: string, sub: string, onClick: () => void) => (
+        <button key={key}
+            onMouseDown={() => { setActivePT(key); onClick(); }}
+            onMouseUp={() => setActivePT(null)}
+            className={`flex flex-col items-center justify-center rounded-lg py-2 border flex-1
+                select-none cursor-pointer transition-all duration-75 gap-0.5
+                ${activePT === key
+                    ? 'bg-purple-500 text-white border-purple-400 scale-95 shadow-[0_0_8px_rgba(168,85,247,0.6)]'
+                    : 'bg-black/50 text-purple-300 border-purple-500/40 hover:border-purple-400 hover:bg-purple-500/10'
+                }`}>
+            <span className="text-xs font-bold font-mono">{key}</span>
+            <span className="text-[8px] text-white/35 leading-none">{top}</span>
+            <span className="text-[7px] text-white/20 leading-none">{sub}</span>
         </button>
     );
 
     return (
         <div className="fixed left-4 z-[9999]" style={{ bottom: '375px' }}>
-            <div className="bg-black/60 backdrop-blur-md border border-rover-cyan/40 rounded-xl p-3 shadow-lg shadow-rover-cyan/20">
-                {/* Title */}
-                <h2 className="text-rover-cyan text-xs font-bold tracking-widest mb-2">DRIVE CONTROL</h2>
+            <div className="bg-black/75 backdrop-blur-md border border-white/12 rounded-2xl p-3 shadow-xl">
 
-                {/* D-pad */}
-                <div style={{
-                    display: 'grid',
-                    gridTemplateAreas: `". up ." "left stop right" ". down ."`,
-                    gridTemplateColumns: 'repeat(3, 48px)',
-                    gridTemplateRows: 'repeat(3, 40px)',
-                    gap: '4px',
-                }}>
-                    {btn('forward', '▲', 'up')}
-                    {btn('left', '◀', 'left')}
+                {/* ── TOP ROW: Drive + Pan/Tilt side by side ─── */}
+                <div className="flex gap-4">
 
-                    {/* Stop */}
-                    <button
-                        style={{ gridArea: 'stop' }}
-                        onMouseDown={() => { setActiveKey('stop'); sendCommand('stop'); }}
-                        onMouseUp={() => setActiveKey(null)}
-                        className={`flex items-center justify-center rounded-md text-[11px] font-bold
-                            select-none cursor-pointer border-2 transition-all duration-75
-                            ${activeKey === 'stop'
-                                ? 'bg-red-500 text-white border-red-400 scale-95 shadow-[0_0_10px_rgba(239,68,68,0.7)]'
-                                : 'bg-red-500/20 text-red-400 border-red-500/50 hover:bg-red-500/40 hover:border-red-400'
-                            }`}
-                    >
-                        ■ STOP
-                    </button>
+                    {/* Drive D-pad */}
+                    <div>
+                        <p className="text-[8px] font-bold tracking-widest text-white/30 mb-2 text-center">🕹 DRIVE</p>
+                        <div style={{
+                            display: 'grid',
+                            gridTemplateAreas: `". up ." "left stop right" ". down ."`,
+                            gridTemplateColumns: 'repeat(3, 40px)',
+                            gridTemplateRows: 'repeat(3, 34px)',
+                            gap: '3px',
+                        }}>
+                            {driveBtn('FORWARD', '▲', 'up')}
+                            {driveBtn('LEFT', '◀', 'left')}
+                            <button style={{ gridArea: 'stop' }}
+                                onMouseDown={() => { setActiveDir('STOP'); sendDrive('STOP'); }}
+                                onMouseUp={() => setActiveDir(null)}
+                                className={`flex items-center justify-center rounded-md text-[8px] font-bold
+                                    select-none cursor-pointer border-2 transition-all duration-75
+                                    ${activeDir === 'STOP'
+                                        ? 'bg-red-500 text-white border-red-400 scale-95'
+                                        : 'bg-red-500/20 text-red-400 border-red-500/50 hover:bg-red-500/30'
+                                    }`}>
+                                ■ STOP
+                            </button>
+                            {driveBtn('RIGHT', '▶', 'right')}
+                            {driveBtn('BACKWARD', '▼', 'down')}
+                        </div>
+                        <p className="text-white/15 text-[7px] text-center mt-1.5 font-mono">WASD · ARROWS</p>
+                    </div>
 
-                    {btn('right', '▶', 'right')}
-                    {btn('backward', '▼', 'down')}
+                    {/* Divider */}
+                    <div className="w-px bg-white/8 self-stretch" />
+
+                    {/* Pan / Tilt */}
+                    <div className="flex flex-col justify-between flex-1">
+                        <p className="text-[8px] font-bold tracking-widest text-white/30 mb-2 text-center">📷 PAN / TILT</p>
+
+                        {/* Pan row */}
+                        <div>
+                            <p className="text-[7px] text-white/20 text-center mb-1">
+                                PAN <span className="text-purple-300 font-mono">{pan}°</span>
+                            </p>
+                            <div className="flex gap-1.5">
+                                {ptBtn('Q', 'PAN', '← LEFT', () => adjustPan(-PT_STEP))}
+                                {ptBtn('E', 'PAN', 'RIGHT →', () => adjustPan(+PT_STEP))}
+                            </div>
+                        </div>
+
+                        {/* Tilt row */}
+                        <div className="mt-2">
+                            <p className="text-[7px] text-white/20 text-center mb-1">
+                                TILT <span className="text-purple-300 font-mono">{tilt}°</span>
+                            </p>
+                            <div className="flex gap-1.5">
+                                {ptBtn('Z', 'TILT', '↓ DOWN', () => adjustTilt(-PT_STEP))}
+                                {ptBtn('C', 'TILT', 'UP ↑', () => adjustTilt(+PT_STEP))}
+                            </div>
+                        </div>
+
+                        <p className="text-white/15 text-[7px] text-center mt-1.5 font-mono">Q/E · Z/C</p>
+                    </div>
                 </div>
 
-                {/* Keyboard hint */}
-                <p className="text-rover-cyan/30 text-[9px] text-center mt-2 font-mono tracking-wider">
-                    WASD · ARROWS · SPACE=STOP
-                </p>
+                {/* ── BOTTOM ROW: Devices full width ────────── */}
+                <div className="border-t border-white/8 mt-3 pt-2.5">
+                    <p className="text-[8px] font-bold tracking-widest text-white/30 mb-2">⚙️ DEVICES</p>
+                    <div className="flex gap-2">
+                        {DEVICES.map(d => (
+                            <button key={d.id}
+                                onClick={() => toggleDevice(d.id)}
+                                className={`flex-1 flex flex-col items-center justify-center gap-0.5 rounded-lg py-1.5 border
+                                    text-[8px] font-bold select-none cursor-pointer transition-all duration-150
+                                    ${devices[d.id]
+                                        ? 'bg-amber-400/20 text-amber-300 border-amber-400/60 shadow-[0_0_6px_rgba(251,191,36,0.3)]'
+                                        : 'bg-white/4 text-white/30 border-white/10 hover:border-white/25 hover:text-white/50'
+                                    }`}>
+                                <span className="text-sm">{d.icon}</span>
+                                <span>{d.label}</span>
+                            </button>
+                        ))}
+                    </div>
+                </div>
             </div>
         </div>
     );

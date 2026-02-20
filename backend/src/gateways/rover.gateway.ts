@@ -10,6 +10,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { GpsDataDto } from '../dto/gps.dto';
 import { RadarDataDto } from '../dto/radar.dto';
+import { MqttService } from '../services/mqtt.service';
 
 @WebSocketGateway({
     cors: {
@@ -19,6 +20,8 @@ import { RadarDataDto } from '../dto/radar.dto';
 export class RoverGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @WebSocketServer()
     server: Server;
+
+    constructor(private mqttService: MqttService) { }
 
     private dashboardClients = new Set<Socket>();
     private roverClients = new Set<Socket>();
@@ -119,11 +122,23 @@ export class RoverGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     @SubscribeMessage('drive-command')
-    handleDriveCommand(@MessageBody() data: { direction: string }) {
-        console.log('Drive command:', data.direction);
-        this.roverClients.forEach((client) => {
-            client.emit('drive-command', data);
-        });
+    handleDriveCommand(@MessageBody() data: { direction: string; speed?: number }) {
+        const move = data.direction.toUpperCase(); // e.g. 'FORWARD'
+        const speed = data.speed ?? 200;
+        console.log(`[DRIVE] ${move} @ ${speed}`);
+        this.mqttService.publish('rover/node2/drive', { move, speed });
+    }
+
+    @SubscribeMessage('pantilt-command')
+    handlePanTilt(@MessageBody() data: { pan?: number; tilt?: number }) {
+        console.log('[PANTILT]', data);
+        this.mqttService.publish('rover/node2/pantilt', data);
+    }
+
+    @SubscribeMessage('device-command')
+    handleDevice(@MessageBody() data: { device: string; state: number }) {
+        console.log(`[DEVICE] ${data.device} → ${data.state}`);
+        this.mqttService.publish('rover/node2/device', data);
     }
 
     // WebRTC signaling handlers

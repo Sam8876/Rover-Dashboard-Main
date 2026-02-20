@@ -195,6 +195,15 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
         return result;
     }
 
+    /** Publish a payload to any MQTT topic */
+    publish(topic: string, payload: object) {
+        if (!this.client?.connected) {
+            console.warn(`[MQTT] Cannot publish to ${topic} — not connected`);
+            return;
+        }
+        this.client.publish(topic, JSON.stringify(payload));
+    }
+
     onModuleDestroy() {
         if (this.client) {
             this.client.end();
