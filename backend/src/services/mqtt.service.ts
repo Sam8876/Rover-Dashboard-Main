@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, OnModuleInit, OnModuleDestroy, Inject, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as mqtt from 'mqtt';
 import { RoverGateway } from '../gateways/rover.gateway';
@@ -9,6 +9,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
 
     constructor(
         private configService: ConfigService,
+        @Inject(forwardRef(() => RoverGateway))
         private roverGateway: RoverGateway,
     ) { }
 

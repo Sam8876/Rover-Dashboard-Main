@@ -7,6 +7,7 @@ import {
     MessageBody,
     ConnectedSocket,
 } from '@nestjs/websockets';
+import { Inject, forwardRef } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { GpsDataDto } from '../dto/gps.dto';
 import { RadarDataDto } from '../dto/radar.dto';
@@ -21,7 +22,10 @@ export class RoverGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @WebSocketServer()
     server: Server;
 
-    constructor(private mqttService: MqttService) { }
+    constructor(
+        @Inject(forwardRef(() => MqttService))
+        private mqttService: MqttService,
+    ) { }
 
     private dashboardClients = new Set<Socket>();
     private roverClients = new Set<Socket>();
