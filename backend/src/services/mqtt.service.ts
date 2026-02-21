@@ -6,6 +6,7 @@ import { RoverGateway } from '../gateways/rover.gateway';
 @Injectable()
 export class MqttService implements OnModuleInit, OnModuleDestroy {
     private client: mqtt.MqttClient;
+    private gpsClient?: mqtt.MqttClient;
 
     constructor(
         private configService: ConfigService,
@@ -15,7 +16,9 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
 
     onModuleInit() {
         const brokerUrl = this.configService.get<string>('MQTT_BROKER_URL', 'mqtt://localhost:1883');
-        console.log(`Connecting to MQTT broker: ${brokerUrl}`);
+        const gpsBrokerUrl = this.configService.get<string>('MQTT_GPS_URL');
+
+        console.log(`[MQTT] Connecting to main broker: ${brokerUrl}`);
 
         this.client = mqtt.connect(brokerUrl, {
             clientId: `nexus-backend-${Date.now()}`,
@@ -24,11 +27,11 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
         });
 
         this.client.on('connect', () => {
-            console.log('✅ Connected to MQTT broker');
-            this.client.subscribe([
+            console.log('✅ Connected to main MQTT broker');
+            const mainTopics = [
                 // Sensor ESP32 — all-in-one topic (actual ESP32 topic)
-                'rover/node1/data',  // ← your ESP32 publishes here
-                'rover/+/data',      // wildcard for any node (node2, node3...)
+                'rover/node1/data',
+                'rover/+/data',
 
                 // Sensor ESP32 — individual topics (if split later)
                 'rover/ultrasonic',
@@ -36,36 +39,63 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
                 'rover/env',
                 'rover/power',
 
-                // GPS-GSM ESP32
-                'rover/gps',
-
                 // Actuator ESP32
                 'rover/actuator/status',
 
                 // Legacy
                 'rover/sensor',
-            ], (err) => {
+            ];
+
+            // If no separate GPS URL, handle GPS on the main broker
+            if (!gpsBrokerUrl) {
+                mainTopics.push('rover/gps');
+            }
+
+            this.client.subscribe(mainTopics, (err) => {
                 if (err) console.error('MQTT subscribe error:', err);
-                else console.log('📡 Subscribed to all rover MQTT topics');
+                else console.log('📡 Subscribed to main rover MQTT topics');
             });
         });
 
         this.client.on('message', (topic, payload) => {
             const raw = payload.toString();
-            console.log(`[MQTT] ${topic}: ${raw}`);
-
+            console.log(`[MQTT-Main] ${topic}: ${raw}`);
             let data: any;
-            try {
-                data = JSON.parse(raw);
-            } catch {
-                data = this.parsePlainString(raw);
-            }
-
+            try { data = JSON.parse(raw); } catch { data = this.parsePlainString(raw); }
             this.routeMessage(topic, data);
         });
 
         this.client.on('error', (err) => console.error('MQTT error:', err.message));
         this.client.on('reconnect', () => console.log('🔄 MQTT reconnecting...'));
+
+        // ── Secondary broker for GPS (Optional) ──
+        if (gpsBrokerUrl) {
+            console.log(`[MQTT] Connecting to GPS broker: ${gpsBrokerUrl}`);
+            this.gpsClient = mqtt.connect(gpsBrokerUrl, {
+                clientId: `nexus-gps-${Date.now()}`,
+                clean: true,
+                reconnectPeriod: 3000,
+            });
+
+            this.gpsClient.on('connect', () => {
+                console.log('✅ Connected to GPS MQTT broker');
+                this.gpsClient!.subscribe('rover/gps', (err) => {
+                    if (err) console.error('GPS MQTT subscribe error:', err);
+                    else console.log('📡 Subscribed to rover/gps on GPS broker');
+                });
+            });
+
+            this.gpsClient.on('message', (topic, payload) => {
+                const raw = payload.toString();
+                console.log(`[MQTT-GPS] ${topic}: ${raw}`);
+                let data: any;
+                try { data = JSON.parse(raw); } catch { data = this.parsePlainString(raw); }
+                this.routeMessage(topic, data);
+            });
+
+            this.gpsClient.on('error', (err) => console.error('GPS MQTT error:', err.message));
+            this.gpsClient.on('reconnect', () => console.log('🔄 GPS MQTT reconnecting...'));
+        }
     }
 
     private routeMessage(topic: string, data: any) {
@@ -113,14 +143,14 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
 
             // ─── GPS-GSM ESP32 ────────────────────────────────────────
             case 'rover/gps':
-                // { lat, lon, speed, heading, satellites, signal }
+                // Expected format: { "node": "gps", "lat": 18.520430, "lon": 73.856743, "speed": 12.45, "direction": 187.32 }
                 this.roverGateway.broadcastToDashboards('gps-data', {
-                    lat: parseFloat(data.lat ?? data.latitude ?? 0),
-                    lon: parseFloat(data.lon ?? data.longitude ?? data.lng ?? 0),
+                    lat: parseFloat(data.lat ?? 0),
+                    lon: parseFloat(data.lon ?? 0),
                     speed: parseFloat(data.speed ?? 0),
-                    heading: parseFloat(data.heading ?? data.course ?? 0),
-                    satellites: parseInt(data.satellites ?? data.sats ?? 0),
-                    signal: parseInt(data.signal ?? data.rssi ?? 0),
+                    heading: parseFloat(data.direction ?? data.heading ?? 0),
+                    satellites: parseInt(data.satellites ?? 0), // Defaulting to 0 if absent
+                    signal: parseInt(data.signal ?? 0), // Defaulting to 0 if absent
                 });
                 break;
 
@@ -208,7 +238,11 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
     onModuleDestroy() {
         if (this.client) {
             this.client.end();
-            console.log('MQTT client disconnected');
+            console.log('✅ Main MQTT client disconnected');
+        }
+        if (this.gpsClient) {
+            this.gpsClient.end();
+            console.log('✅ GPS MQTT client disconnected');
         }
     }
 }
