@@ -7,8 +7,9 @@ import CameraFeed from './Camera/CameraFeed';
 import TelemetryOverlay from './Telemetry/TelemetryOverlay';
 import DriveControl from './DriveControl/DriveControl';
 
-// Dynamically use the same host the page is served from — works on localhost AND via Tailscale
-const BACKEND_URL = `http://${window.location.hostname}:8080`;
+// Dynamically use the same host the page is served from, but dynamically use the port from env
+const BACKEND_PORT = import.meta.env.VITE_BACKEND_PORT || '8080';
+const BACKEND_URL = `http://${window.location.hostname}:${BACKEND_PORT}`;
 
 export default function Dashboard() {
     const { socket, connected } = useWebSocket(BACKEND_URL);

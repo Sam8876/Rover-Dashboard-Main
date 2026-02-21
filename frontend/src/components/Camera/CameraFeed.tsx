@@ -12,6 +12,7 @@ export default function CameraFeed({ yoloObjects, backendUrl }: CameraFeedProps)
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const pcRef = useRef<RTCPeerConnection | null>(null);
+    const wsRef = useRef<WebSocket | null>(null);
 
     const [activeCam, setActiveCam] = useState<CamId>(1);
     const [isConnected, setIsConnected] = useState(false);
@@ -23,7 +24,11 @@ export default function CameraFeed({ yoloObjects, backendUrl }: CameraFeedProps)
             .then(r => r.json())
             .then(data => {
                 console.log('Camera URLs:', data);
-                setCamUrls({ cam1: data.cam1, cam2: data.cam2 });
+                // Respect explicit cam1/cam2, but gracefully fallback to the singular wsUrl if it exists
+                setCamUrls({
+                    cam1: data.wsUrl || data.cam1,
+                    cam2: data.cam2 || data.wsUrl
+                });
             })
             .catch(err => console.error('Failed to fetch camera URLs:', err));
     }, [backendUrl]);
@@ -31,6 +36,10 @@ export default function CameraFeed({ yoloObjects, backendUrl }: CameraFeedProps)
     // ── Connect / reconnect WebRTC whenever cam URL changes ───
     const connect = useCallback((url: string) => {
         // Tear down existing connection
+        if (wsRef.current) {
+            wsRef.current.close();
+            wsRef.current = null;
+        }
         if (pcRef.current) {
             pcRef.current.close();
             pcRef.current = null;
@@ -70,7 +79,14 @@ export default function CameraFeed({ yoloObjects, backendUrl }: CameraFeedProps)
         if (!camUrls) return;
         const url = activeCam === 1 ? camUrls.cam1 : camUrls.cam2;
         connect(url);
-        return () => { pcRef.current?.close(); };
+        return () => {
+            if (wsRef.current) {
+                wsRef.current.close();
+                wsRef.current = null;
+            }
+            pcRef.current?.close();
+            pcRef.current = null;
+        };
     }, [activeCam, camUrls, connect]);
 
     // ── HTTP signaling ────────────────────────────────────────
@@ -102,20 +118,26 @@ export default function CameraFeed({ yoloObjects, backendUrl }: CameraFeedProps)
 
     // ── WebSocket signaling ───────────────────────────────────
     function setupWs(pc: RTCPeerConnection, url: string) {
-        // Explicitly state we want to receive video
         pc.addTransceiver('video', { direction: 'recvonly' });
 
         const ws = new WebSocket(url);
+        wsRef.current = ws;
         ws.onopen = async () => {
+            // Guard: check pc is still alive
+            if ((pc.signalingState as string) === 'closed') { ws.close(); return; }
             const offer = await pc.createOffer();
+            if ((pc.signalingState as string) === 'closed') { ws.close(); return; }
             await pc.setLocalDescription(offer);
             ws.send(JSON.stringify({ type: 'offer', sdp: pc.localDescription?.sdp }));
         };
         ws.onmessage = async (e) => {
             const msg = JSON.parse(e.data);
             if (msg.type === 'answer') {
+                // Guard: check pc is still alive
+                if ((pc.signalingState as string) === 'closed') return;
                 await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: msg.sdp }));
             } else if (msg.type === 'candidate') {
+                if ((pc.signalingState as string) === 'closed') return;
                 await pc.addIceCandidate(new RTCIceCandidate({
                     candidate: msg.candidate,
                     sdpMid: msg.sdpMid,
@@ -134,6 +156,7 @@ export default function CameraFeed({ yoloObjects, backendUrl }: CameraFeedProps)
             }
         };
         ws.onerror = (err) => console.error('[CAM] WS error:', err);
+        ws.onclose = () => console.log('[CAM] WS closed');
     }
 
     // ── YOLO bounding boxes ───────────────────────────────────
