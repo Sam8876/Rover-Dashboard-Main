@@ -76,26 +76,25 @@ export default function CameraFeed({ yoloObjects, backendUrl }: CameraFeedProps)
     // ── HTTP signaling ────────────────────────────────────────
     async function setupHttp(pc: RTCPeerConnection, url: string) {
         try {
+            // Explicitly state we want to receive video
+            pc.addTransceiver('video', { direction: 'recvonly' });
+
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
+
+            // Give a tiny moment for local ICE candidates to gather into the SDP
+            await new Promise(r => setTimeout(r, 250));
+
             const res = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ type: 'offer', sdp: pc.localDescription?.sdp }),
             });
+
             const data = await res.json();
             if (data.type === 'answer' && data.sdp) {
                 await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: data.sdp }));
             }
-            pc.onicecandidate = async (e) => {
-                if (e.candidate) {
-                    await fetch(`${url}/ice`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ candidate: e.candidate }),
-                    }).catch(() => { });
-                }
-            };
         } catch (err) {
             console.error('[CAM] HTTP signaling error:', err);
         }
@@ -103,23 +102,35 @@ export default function CameraFeed({ yoloObjects, backendUrl }: CameraFeedProps)
 
     // ── WebSocket signaling ───────────────────────────────────
     function setupWs(pc: RTCPeerConnection, url: string) {
+        // Explicitly state we want to receive video
+        pc.addTransceiver('video', { direction: 'recvonly' });
+
         const ws = new WebSocket(url);
         ws.onopen = async () => {
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
-            ws.send(JSON.stringify({ type: 'offer', offer }));
+            ws.send(JSON.stringify({ type: 'offer', sdp: pc.localDescription?.sdp }));
         };
         ws.onmessage = async (e) => {
             const msg = JSON.parse(e.data);
             if (msg.type === 'answer') {
-                await pc.setRemoteDescription(new RTCSessionDescription(msg.answer));
-            } else if (msg.type === 'ice-candidate') {
-                await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
+                await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: msg.sdp }));
+            } else if (msg.type === 'candidate') {
+                await pc.addIceCandidate(new RTCIceCandidate({
+                    candidate: msg.candidate,
+                    sdpMid: msg.sdpMid,
+                    sdpMLineIndex: msg.sdpMLineIndex
+                }));
             }
         };
         pc.onicecandidate = (e) => {
             if (e.candidate && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: 'ice-candidate', candidate: e.candidate }));
+                ws.send(JSON.stringify({
+                    type: 'candidate',
+                    candidate: e.candidate.candidate,
+                    sdpMid: e.candidate.sdpMid,
+                    sdpMLineIndex: e.candidate.sdpMLineIndex
+                }));
             }
         };
         ws.onerror = (err) => console.error('[CAM] WS error:', err);
