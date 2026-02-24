@@ -121,17 +121,17 @@ export default function TelemetryOverlay({
     gpsData, imuData, envData, powerData, connected,
 }: TelemetryOverlayProps) {
     return (
-        <div className="fixed top-4 right-4 z-[9999] w-[420px]">
+        <div className="fixed top-4 right-4 z-30 w-[420px]">
 
             {/* ── Status bar ─────────────────────────────────── */}
             <div className="flex items-center justify-end gap-2 mb-2">
                 <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-mono font-bold ${connected
-                        ? 'text-green-400 border-green-400/40 bg-black/80 shadow-[0_0_10px_#4ade8033]'
-                        : 'text-red-400 border-red-400/40 bg-black/80'
+                    ? 'text-green-400 border-green-400/40 bg-black/80 shadow-[0_0_10px_#4ade8033]'
+                    : 'text-red-400 border-red-400/40 bg-black/80'
                     }`}>
                     <div className={`w-2 h-2 rounded-full shrink-0 ${connected
-                            ? 'bg-green-400 animate-pulse shadow-[0_0_6px_#4ade80]'
-                            : 'bg-red-500 shadow-[0_0_6px_#ef4444]'
+                        ? 'bg-green-400 animate-pulse shadow-[0_0_6px_#4ade80]'
+                        : 'bg-red-500 shadow-[0_0_6px_#ef4444]'
                         }`} />
                     {connected ? 'ONLINE' : 'OFFLINE'}
                 </div>

@@ -13,7 +13,7 @@ const BACKEND_URL = `http://${window.location.hostname}:${BACKEND_PORT}`;
 
 export default function Dashboard() {
     const { socket, connected } = useWebSocket(BACKEND_URL);
-    const { gpsData, radarData, imuData, envData, powerData, yoloObjects } = useRoverData(socket, connected);
+    const { gpsData, radarData, imuData, envData, powerData } = useRoverData(socket, connected);
 
     return (
         <div className="w-full h-screen bg-rover-dark overflow-hidden">
@@ -31,7 +31,7 @@ export default function Dashboard() {
 
             <RadarDisplay radarData={radarData} />
 
-            <CameraFeed yoloObjects={yoloObjects} backendUrl={BACKEND_URL} />
+            <CameraFeed backendUrl={BACKEND_URL} />
 
             <DriveControl socket={socket} />
         </div>

@@ -1,21 +1,19 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import type { YoloObject } from '../../types/rover.types';
 
 interface CameraFeedProps {
-    yoloObjects: YoloObject[];
     backendUrl: string;
 }
 
 type CamId = 1 | 2;
 
-export default function CameraFeed({ yoloObjects, backendUrl }: CameraFeedProps) {
+export default function CameraFeed({ backendUrl }: CameraFeedProps) {
     const videoRef = useRef<HTMLVideoElement>(null);
-    const canvasRef = useRef<HTMLCanvasElement>(null);
     const pcRef = useRef<RTCPeerConnection | null>(null);
     const wsRef = useRef<WebSocket | null>(null);
 
     const [activeCam, setActiveCam] = useState<CamId>(1);
     const [isConnected, setIsConnected] = useState(false);
+    const [isExpanded, setIsExpanded] = useState(false);
     const [camUrls, setCamUrls] = useState<{ cam1: string; cam2: string } | null>(null);
 
     // ── Fetch both camera URLs from backend once ──────────────
@@ -159,34 +157,15 @@ export default function CameraFeed({ yoloObjects, backendUrl }: CameraFeedProps)
         ws.onclose = () => console.log('[CAM] WS closed');
     }
 
-    // ── YOLO bounding boxes ───────────────────────────────────
-    useEffect(() => {
-        const canvas = canvasRef.current;
-        const video = videoRef.current;
-        if (!canvas || !video) return;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-        canvas.width = video.clientWidth;
-        canvas.height = video.clientHeight;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        yoloObjects.forEach((obj) => {
-            ctx.strokeStyle = '#00ffe1';
-            ctx.lineWidth = 2;
-            ctx.strokeRect(obj.x, obj.y, obj.w, obj.h);
-            ctx.fillStyle = '#00ffe1';
-            ctx.font = '12px monospace';
-            ctx.fillText(`${obj.label} (${obj.conf})`, obj.x, obj.y > 15 ? obj.y - 5 : obj.y + 15);
-        });
-    }, [yoloObjects]);
-
     // ── Render ────────────────────────────────────────────────
     return (
-        <div className="fixed bottom-4 right-4 z-40">
-            <div className="bg-black/80 backdrop-blur-md border border-white/15 rounded-2xl overflow-hidden shadow-2xl"
+        <div className={isExpanded ? "fixed inset-[5px] z-50 transition-all duration-300" : "fixed bottom-4 right-4 z-40 transition-all duration-300"}>
+            <div className={`bg-black/80 backdrop-blur-md border border-white/15 rounded-2xl overflow-hidden shadow-2xl flex flex-col h-full
+                ${isExpanded ? 'w-full' : 'w-[520px]'}`}
                 style={{ boxShadow: '0 0 30px rgba(0,0,0,0.6), 0 0 1px rgba(0,255,225,0.2) inset' }}>
 
                 {/* Header */}
-                <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/8">
+                <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/8 shrink-0">
                     <div className="flex items-center gap-2">
                         <div className={`w-2 h-2 rounded-full shrink-0 ${isConnected
                             ? 'bg-green-400 animate-pulse shadow-[0_0_6px_#4ade80]'
@@ -195,35 +174,43 @@ export default function CameraFeed({ yoloObjects, backendUrl }: CameraFeedProps)
                         <span className="text-xs font-bold tracking-widest text-white">LIVE CAMERA</span>
                     </div>
 
-                    {/* Camera switcher buttons */}
-                    <div className="flex gap-1 p-0.5 bg-white/6 rounded-lg border border-white/10">
-                        {([1, 2] as CamId[]).map(id => (
-                            <button
-                                key={id}
-                                onClick={() => setActiveCam(id)}
-                                className={`text-[10px] font-bold font-mono px-2.5 py-1 rounded-md transition-all duration-200 ${activeCam === id
-                                    ? 'bg-rover-cyan text-black shadow-[0_0_8px_rgba(0,255,225,0.5)]'
-                                    : 'text-white/40 hover:text-white/70'
-                                    }`}
-                            >
-                                CAM {id}
-                            </button>
-                        ))}
+                    {/* Header Controls */}
+                    <div className="flex gap-3 items-center">
+                        {/* Switcher Buttons */}
+                        <div className="flex gap-1 p-0.5 bg-white/6 rounded-lg border border-white/10">
+                            {([1, 2] as CamId[]).map(id => (
+                                <button
+                                    key={id}
+                                    onClick={() => setActiveCam(id)}
+                                    className={`text-[10px] font-bold font-mono px-2.5 py-1 rounded-md transition-all duration-200 ${activeCam === id
+                                        ? 'bg-rover-cyan text-black shadow-[0_0_8px_rgba(0,255,225,0.5)]'
+                                        : 'text-white/40 hover:text-white/70'
+                                        }`}
+                                >
+                                    CAM {id}
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* Expand Toggle */}
+                        <button
+                            onClick={() => setIsExpanded(!isExpanded)}
+                            className="flex items-center justify-center p-1 px-2.5 bg-white/5 hover:bg-white/15 rounded-lg border border-white/10 text-white/50 hover:text-white transition-colors"
+                            title={isExpanded ? "Collapse" : "Expand"}
+                        >
+                            {isExpanded ? '🗗' : '🗖'}
+                        </button>
                     </div>
                 </div>
 
-                {/* Video area — 16:9 container, any aspect ratio fits perfectly */}
-                <div className="relative w-[520px] bg-black" style={{ aspectRatio: '16/9' }}>
+                {/* Video area — 16:9 natively, but flex-1 to fill expanded space perfectly */}
+                <div className="relative bg-black flex-1 min-h-0 w-full flex items-center justify-center" style={isExpanded ? {} : { aspectRatio: '16/9' }}>
                     <video
                         ref={videoRef}
                         autoPlay
                         playsInline
                         muted
                         className="w-full h-full object-contain"
-                    />
-                    <canvas
-                        ref={canvasRef}
-                        className="absolute top-0 left-0 w-full h-full pointer-events-none"
                     />
 
                     {/* Status badge */}

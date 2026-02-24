@@ -36,6 +36,9 @@
     "vite": "^8.0.0-beta.13"
   },
   "overrides": {
-    "vite": "^8.0.0-beta.13"
+    "vite": "^8.0.0-beta.13",
+    "glob": "^11.0.0",
+    "rimraf": "^5.0.5",
+    "inflight": "1.0.6"
   }
 }
