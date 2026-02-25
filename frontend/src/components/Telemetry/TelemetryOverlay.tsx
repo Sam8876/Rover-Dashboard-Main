@@ -150,6 +150,16 @@ export default function TelemetryOverlay({
                                 <AnimVal value={gpsData.speed} dec={1} />
                             </Row>
                             <Row label="Hdg" unit="°">{gpsData.heading.toFixed(0)}</Row>
+                            {gpsData.active !== undefined && (
+                                <Row label="Status" color={gpsData.active ? '#00ffe1' : '#f59e0b'}>
+                                    {gpsData.active ? 'ACTIVE' : 'IDLE'}
+                                </Row>
+                            )}
+                            {gpsData.sos && (
+                                <Row label="SOS" color="#ef4444">
+                                    <span className="animate-pulse font-bold tracking-widest text-red-500">ACTIVATED</span>
+                                </Row>
+                            )}
                             {gpsData.satellites !== undefined && (
                                 <Row label="Sats"
                                     color={gpsData.satellites >= 4 ? '#4ade80' : '#f59e0b'}>

@@ -6,6 +6,8 @@ export interface GpsData {
     heading: number;   // degrees 0-360
     satellites?: number;
     signal?: number;   // GSM signal strength
+    active?: boolean;
+    sos?: boolean;
 }
 
 // ─── Sensor ESP32 ────────────────────────────────

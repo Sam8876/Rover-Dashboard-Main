@@ -68,8 +68,14 @@ export default function CameraFeed({ backendUrl }: CameraFeedProps) {
         pcRef.current = pc;
 
         pc.ontrack = (event) => {
-            if (videoRef.current && event.streams[0]) {
-                videoRef.current.srcObject = event.streams[0];
+            if (videoRef.current) {
+                if (event.streams && event.streams[0]) {
+                    videoRef.current.srcObject = event.streams[0];
+                } else {
+                    // aiortc sometimes delivers the track directly without bundling it into a stream array
+                    videoRef.current.srcObject = new MediaStream([event.track]);
+                }
+                videoRef.current.play().catch(e => console.error('Video autoplay failed:', e));
                 setIsConnected(true);
             }
         };

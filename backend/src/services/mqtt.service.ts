@@ -49,6 +49,7 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
             // If no separate GPS URL, handle GPS on the main broker
             if (!gpsBrokerUrl) {
                 mainTopics.push('rover/gps');
+                mainTopics.push('rover/+/gps');
             }
 
             this.client.subscribe(mainTopics, (err) => {
@@ -143,12 +144,14 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
 
             // ─── GPS-GSM ESP32 ────────────────────────────────────────
             case 'rover/gps':
-                // Expected format: { "node": "gps", "lat": 18.520430, "lon": 73.856743, "speed": 12.45, "direction": 187.32 }
+            case 'rover/node2/gps':
                 this.roverGateway.broadcastToDashboards('gps-data', {
                     lat: parseFloat(data.lat ?? 0),
-                    lon: parseFloat(data.lon ?? 0),
+                    lon: parseFloat(data.lon ?? data.long ?? 0),
                     speed: parseFloat(data.speed ?? 0),
                     heading: parseFloat(data.direction ?? data.heading ?? 0),
+                    active: data.active,
+                    sos: data.sos,
                     satellites: parseInt(data.satellites ?? 0), // Defaulting to 0 if absent
                     signal: parseInt(data.signal ?? 0), // Defaulting to 0 if absent
                 });
