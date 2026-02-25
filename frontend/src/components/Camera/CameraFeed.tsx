@@ -111,19 +111,42 @@ export default function CameraFeed({ backendUrl }: CameraFeedProps) {
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
 
-            // Give a tiny moment for local ICE candidates to gather into the SDP
-            await new Promise(r => setTimeout(r, 250));
-
-            const res = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ type: 'offer', sdp: pc.localDescription?.sdp }),
+            // Wait until ICE candidates (like STUN/Tailscale IPs) finish gathering into the SDP
+            // Otherwise MediaMTX receives an empty/local routing address and streams to nowhere!
+            await new Promise<void>((resolve) => {
+                if (pc.iceGatheringState === 'complete') {
+                    resolve();
+                } else {
+                    const checkState = () => {
+                        if (pc.iceGatheringState === 'complete') {
+                            pc.removeEventListener('icegatheringstatechange', checkState);
+                            resolve();
+                        }
+                    };
+                    pc.addEventListener('icegatheringstatechange', checkState);
+                    // 500ms timeout buffer to prevent infinite hanging
+                    setTimeout(() => {
+                        pc.removeEventListener('icegatheringstatechange', checkState);
+                        resolve();
+                    }, 500);
+                }
             });
 
-            const data = await res.json();
-            if (data.type === 'answer' && data.sdp) {
-                await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: data.sdp }));
+            // Send raw SDP text to MediaMTX WHEP endpoint
+            const whepUrl = url.endsWith('/whep') ? url : `${url}/whep`;
+            const res = await fetch(whepUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/sdp' },
+                body: pc.localDescription?.sdp,
+            });
+
+            if (!res.ok) {
+                throw new Error(`MediaMTX connection failed: ${res.statusText}`);
             }
+
+            const answerSdp = await res.text();
+            await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: answerSdp }));
+
         } catch (err) {
             console.error('[CAM] HTTP signaling error:', err);
         }
