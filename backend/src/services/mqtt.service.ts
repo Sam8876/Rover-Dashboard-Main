@@ -80,9 +80,9 @@ export class MqttService implements OnModuleInit, OnModuleDestroy {
 
             this.gpsClient.on('connect', () => {
                 console.log('✅ Connected to GPS MQTT broker');
-                this.gpsClient!.subscribe('rover/gps', (err) => {
+                this.gpsClient!.subscribe(['rover/gps', 'rover/+/gps'], (err) => {
                     if (err) console.error('GPS MQTT subscribe error:', err);
-                    else console.log('📡 Subscribed to rover/gps on GPS broker');
+                    else console.log('📡 Subscribed to rover/gps and rover/+/gps on GPS broker');
                 });
             });
 
