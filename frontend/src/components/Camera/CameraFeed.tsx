@@ -22,7 +22,6 @@ export default function CameraFeed({ backendUrl }: CameraFeedProps) {
             .then(r => r.json())
             .then(data => {
                 console.log('Camera URLs:', data);
-                // Respect explicit cam1/cam2, but gracefully fallback to the singular wsUrl if it exists
                 setCamUrls({
                     cam1: data.wsUrl || data.cam1,
                     cam2: data.cam2 || data.wsUrl
@@ -31,20 +30,8 @@ export default function CameraFeed({ backendUrl }: CameraFeedProps) {
             .catch(err => console.error('Failed to fetch camera URLs:', err));
     }, [backendUrl]);
 
-    // ── Connect / reconnect WebRTC whenever cam URL changes ───
+    // ── Connect WebRTC logic ───
     const connect = useCallback((url: string) => {
-        // Tear down existing connection
-        if (wsRef.current) {
-            wsRef.current.close();
-            wsRef.current = null;
-        }
-        if (pcRef.current) {
-            pcRef.current.close();
-            pcRef.current = null;
-        }
-        if (videoRef.current) videoRef.current.srcObject = null;
-        setIsConnected(false);
-
         const isHttp = url.startsWith('http://') || url.startsWith('https://');
         const isWs = url.startsWith('ws://') || url.startsWith('wss://');
 
@@ -72,7 +59,6 @@ export default function CameraFeed({ backendUrl }: CameraFeedProps) {
                 if (event.streams && event.streams[0]) {
                     videoRef.current.srcObject = event.streams[0];
                 } else {
-                    // aiortc sometimes delivers the track directly without bundling it into a stream array
                     videoRef.current.srcObject = new MediaStream([event.track]);
                 }
                 videoRef.current.play().catch(e => console.error('Video autoplay failed:', e));
@@ -88,31 +74,55 @@ export default function CameraFeed({ backendUrl }: CameraFeedProps) {
         else if (isWs) setupWs(pc, url);
     }, []);
 
+    // ── Stream Switcher with "Breathing Room" Delay ───────────
     useEffect(() => {
         if (!camUrls) return;
+
+        let isCancelled = false;
         const url = activeCam === 1 ? camUrls.cam1 : camUrls.cam2;
-        connect(url);
+
+        // 1. Immediately tear down any existing connection to free up the Pi's CPU
+        if (wsRef.current) {
+            wsRef.current.close();
+            wsRef.current = null;
+        }
+        if (pcRef.current) {
+            pcRef.current.close();
+            pcRef.current = null;
+        }
+        if (videoRef.current) videoRef.current.srcObject = null;
+        setIsConnected(false);
+
+        // 2. Give the Raspberry Pi 600ms to safely kill the previous camera process
+        const connectTimer = setTimeout(() => {
+            if (!isCancelled) {
+                connect(url);
+            }
+        }, 600);
+
+        // Cleanup on unmount or when activeCam changes again rapidly
         return () => {
+            isCancelled = true;
+            clearTimeout(connectTimer);
             if (wsRef.current) {
                 wsRef.current.close();
                 wsRef.current = null;
             }
-            pcRef.current?.close();
-            pcRef.current = null;
+            if (pcRef.current) {
+                pcRef.current.close();
+                pcRef.current = null;
+            }
         };
     }, [activeCam, camUrls, connect]);
 
     // ── HTTP signaling ────────────────────────────────────────
     async function setupHttp(pc: RTCPeerConnection, url: string) {
         try {
-            // Explicitly state we want to receive video
             pc.addTransceiver('video', { direction: 'recvonly' });
 
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
 
-            // Wait until ICE candidates (like STUN/Tailscale IPs) finish gathering into the SDP
-            // Otherwise MediaMTX receives an empty/local routing address and streams to nowhere!
             await new Promise<void>((resolve) => {
                 if (pc.iceGatheringState === 'complete') {
                     resolve();
@@ -124,7 +134,6 @@ export default function CameraFeed({ backendUrl }: CameraFeedProps) {
                         }
                     };
                     pc.addEventListener('icegatheringstatechange', checkState);
-                    // 500ms timeout buffer to prevent infinite hanging
                     setTimeout(() => {
                         pc.removeEventListener('icegatheringstatechange', checkState);
                         resolve();
@@ -132,7 +141,6 @@ export default function CameraFeed({ backendUrl }: CameraFeedProps) {
                 }
             });
 
-            // Send raw SDP text to MediaMTX WHEP endpoint
             const whepUrl = url.endsWith('/whep') ? url : `${url}/whep`;
             const res = await fetch(whepUrl, {
                 method: 'POST',
@@ -159,7 +167,6 @@ export default function CameraFeed({ backendUrl }: CameraFeedProps) {
         const ws = new WebSocket(url);
         wsRef.current = ws;
         ws.onopen = async () => {
-            // Guard: check pc is still alive
             if ((pc.signalingState as string) === 'closed') { ws.close(); return; }
             const offer = await pc.createOffer();
             if ((pc.signalingState as string) === 'closed') { ws.close(); return; }
@@ -169,7 +176,6 @@ export default function CameraFeed({ backendUrl }: CameraFeedProps) {
         ws.onmessage = async (e) => {
             const msg = JSON.parse(e.data);
             if (msg.type === 'answer') {
-                // Guard: check pc is still alive
                 if ((pc.signalingState as string) === 'closed') return;
                 await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: msg.sdp }));
             } else if (msg.type === 'candidate') {
@@ -241,7 +247,7 @@ export default function CameraFeed({ backendUrl }: CameraFeedProps) {
                     </div>
                 </div>
 
-                {/* Video area — 16:9 natively, but flex-1 to fill expanded space perfectly */}
+                {/* Video area */}
                 <div className="relative bg-black flex-1 min-h-0 w-full flex items-center justify-center" style={isExpanded ? {} : { aspectRatio: '16/9' }}>
                     <video
                         ref={videoRef}

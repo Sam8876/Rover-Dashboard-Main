@@ -7,9 +7,9 @@ export class ConfigController {
 
     @Get('webrtc-url')
     getWebRTCUrl() {
-        const url1 = this.configService.get<string>('RASPBERRY_PI_WEBRTC_URL', 'ws://100.115.91.111:8088/ws');
-        // Add an explicit fallback for cam2 (e.g. port 8089) if not set in .env
-        const url2 = this.configService.get<string>('RASPBERRY_PI_WEBRTC_URL_2', 'ws://100.115.91.111:8089/ws');
+        const url1 = this.configService.get<string>('RASPBERRY_PI_WEBRTC_URL', 'http://100.115.91.111:8889/rovercam');
+        // Both cam1 and cam2 share the same Mediaplayer UDP 8088 track Relay
+        const url2 = this.configService.get<string>('RASPBERRY_PI_WEBRTC_URL_2', 'http://100.115.91.111:8889/rovercam');
 
         return {
             wsUrl: url1,
